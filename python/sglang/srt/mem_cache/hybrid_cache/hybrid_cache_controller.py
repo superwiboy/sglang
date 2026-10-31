@@ -43,6 +43,9 @@ from sglang.srt.mem_cache.pool_host.mha import MHATokenToKVPoolHost
 from sglang.srt.mem_cache.pool_host.page_interleave import PageInterleaveHostPool
 from sglang.srt.mem_cache.pool_host.unified import UnifiedPageEnvelopeHostPool
 from sglang.srt.mem_cache.radix_cache import RadixKey
+from sglang.srt.mem_cache.unified_cache.storage_agreement import (
+    LocalQueryOutcomeMixin,
+)
 
 if TYPE_CHECKING:
     from sglang.srt.mem_cache.allocator import BaseTokenToKVPoolAllocator
@@ -142,7 +145,7 @@ class StorageOperation(BaseStorageOperation):
         self.pool_storage_result = PoolTransferResult.empty()
 
 
-class PrefetchOperation(StorageOperation):
+class PrefetchOperation(StorageOperation, LocalQueryOutcomeMixin):
     def __init__(
         self,
         handle: CacheRequestHandle,
@@ -195,6 +198,9 @@ class PrefetchOperation(StorageOperation):
     def is_terminated(self) -> bool:
         with self._lock:
             return self._terminated_flag
+
+    def local_restorable_pages(self):
+        return self.pool_storage_result.restorable_prefix_pages
 
 
 @dataclass(frozen=True)

@@ -37,6 +37,23 @@ _PREFETCH_POLICIES = ("best_effort", "wait_complete", "timeout")
 _WRITE_POLICIES = ("write_back", "write_through", "write_through_selective")
 
 
+def buffer_mode_pp_unsupported(host_memory_mode: str, pp_size: int) -> Optional[str]:
+    """Why a storage backend cannot be enabled for this layout, or None.
+
+    Storage agreement runs on the scheduler thread of one PP stage. The PP
+    ticket path that spread buffer-mode queries over the pipeline has not been
+    ported onto it, so buffer_only with PP>1 fails loud instead of running a
+    second, worker-thread agreement path next to the scheduler's.
+    """
+    if host_memory_mode == "buffer_only" and pp_size > 1:
+        return (
+            "HiCache buffer_only host memory does not support a storage backend "
+            "with pipeline parallelism (pp_size > 1): storage agreement runs on "
+            "the scheduler thread and the PP ticket path has not been ported to it."
+        )
+    return None
+
+
 class StorageAttachment:
     """Attach / detach the storage backend of one ``UnifiedRadixCache``."""
 
@@ -75,6 +92,9 @@ class StorageAttachment:
                 "HiCache is not initialized (no cache controller); "
                 "launch with --enable-hierarchical-cache to attach a backend.",
             )
+        unsupported = cache.storage_layout_unsupported()
+        if unsupported is not None:
+            return False, unsupported
         if page_interleave_shard_size(cache.token_to_kv_pool_allocator) > 1:
             # Runtime attach bypasses kv_shard_hook.py's startup validation.
             return (
@@ -222,6 +242,9 @@ class StorageAttachment:
 
         try:
             self._release_pending_storage_ops()
+            if cache.storage_engine is not None:
+                # Queries still awaiting agreement belong to the detached backend.
+                cache.storage_engine.reset()
             cache.drain_storage_control_queues_local()
         except Exception:
             logger.exception("Failed post-detach cleanup of storage bookkeeping.")
